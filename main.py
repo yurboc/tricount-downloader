@@ -267,6 +267,99 @@ class TricountHandler:
 
             print(f"Transactions have been saved to {file_name}.csv.")
 
+    @staticmethod
+    def write_expenses_text_report(memberships, transactions, file_name="expenses"):
+        members = sorted(m["Name"] for m in memberships)
+        lines = []
+
+        def tx_date(when: str) -> str:
+            return when[:10] if when else ""
+
+        def tx_type_ru(type_transaction):
+            return {
+                "NORMAL":  "расход",
+                "BALANCE": "пер.-д",
+                "INCOME":  "приход",
+            }.get(type_transaction, type_transaction)
+
+        for name in members:
+            lines.append("=" * 72)
+            lines.append(f"Участник: {name}")
+            lines.append("")
+
+            lines_transfer = []
+            lines_payer = []
+            lines_share = []
+
+            transfer = 0.0
+            paid = 0.0
+            spent = 0.0
+
+            sorted_tx = sorted(transactions, key=lambda t: t["When"], reverse=True)
+            any_row = False
+            for t in sorted_tx:
+                is_transfer = t["Type"] == "BALANCE"
+                is_payer = t["Who Paid"] == name
+                share = float(t["Shares"].get(name, 0.0))
+                has_share = share > 0
+                if not is_payer and not has_share:
+                    continue
+                any_row = True
+                ccy = t["Currency"]
+                d = tx_date(t["When"])
+                kind = tx_type_ru(t["Type"])
+                desc = t["Description"] or "(без описания)"
+                amt = t["Total"]
+                if is_transfer:
+                    user_me_amt = float(t["Shares"].get(name, 0.0))
+                    user_other_name = ""
+                    user_other_amt = 0.0
+                    for share_name in t["Shares"]:
+                        if share_name != name:
+                            user_other_name = share_name
+                            user_other_amt = float(t["Shares"].get(share_name, 0.0))
+                    transfer -= user_me_amt
+                    transfer += user_other_amt
+                    is_income = user_me_amt > 0.0
+                    lines_transfer.append(f"  {(-1 if is_income else 1) * amt:9.2f}"
+                            f"{ccy} [{d}] — {desc} — {'мне <-' if is_income else 'я ->'} {user_other_name}")
+                if is_payer and not is_transfer:
+                    paid += amt
+                    lines_payer.append(f"  {amt:9.2f} {ccy} [{d} {kind}] — {desc}")
+                if has_share and not is_transfer:
+                    if amt < 0.0:
+                        share *= -1
+                    spent += share
+                    payer_label = "Вас" if t["Who Paid"] == name else t["Who Paid"]
+                    lines_share.append(f"  {share:9.2f} {ccy} из {amt:9.2f} [{d} {kind}] от {payer_label} — {desc}")
+
+            lines.append("Переводы:")
+            lines += lines_transfer
+            lines.append("")
+            lines.append("Оплаты и получения:")
+            lines += lines_payer
+            lines.append("")
+            lines.append("Участие в расходах:")
+            lines += lines_share
+
+            if not any_row:
+                lines.append("  (нет операций с вашим участием)")
+
+            bal = transfer + paid - spent
+            lines.append("")
+            lines.append("  Баланс:")
+            lines.append(f"    переводы: {transfer:10.2f} {ccy}")
+            lines.append(f"    оплаты:   {paid:10.2f} {ccy}")
+            lines.append(f"    расходы:  {spent:10.2f} {ccy}")
+            lines.append(f"    ИТОГО:    {bal:10.2f} {ccy}")
+            lines.append("")
+
+        out_path = f"{file_name}.txt"
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        print(f"Member expense report saved to {out_path}.")
+
+
 
 if __name__ == "__main__":
     # example key
@@ -294,3 +387,4 @@ if __name__ == "__main__":
     #handler.write_to_excel(transactions, file_name=f"Transactions {tricount_title}")
     #handler.write_to_sesterce_csv(memberships, transactions, f"Transaction {tricount_title} (Sesterce)")
     #handler.download_attachments(transactions, download_folder=f"Attachments {tricount_title}")
+    handler.write_expenses_text_report(memberships, transactions, file_name=f"Expenses {tricount_title}")
