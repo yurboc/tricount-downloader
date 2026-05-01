@@ -268,9 +268,10 @@ class TricountHandler:
             print(f"Transactions have been saved to {file_name}.csv.")
 
     @staticmethod
-    def write_expenses_text_report(memberships, transactions, file_name="expenses"):
+    def write_expenses_text_report(memberships, transactions, all_file_name="expenses", user_file_name="user"):
         members = sorted(m["Name"] for m in memberships)
         lines = []
+        member_lines = []
 
         def tx_date(when: str) -> str:
             return when[:10] if when else ""
@@ -283,6 +284,7 @@ class TricountHandler:
             }.get(type_transaction, type_transaction)
 
         for name in members:
+            lines = []
             lines.append("=" * 72)
             lines.append(f"Участник: {name}")
             lines.append("")
@@ -354,9 +356,16 @@ class TricountHandler:
             lines.append(f"    ИТОГО:    {bal:10.2f} {ccy}")
             lines.append("")
 
-        out_path = f"{file_name}.txt"
+            member_lines.append(lines)
+            out_path = f"{user_file_name} {name}.txt"
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            print(f"  {name} expense report saved to {out_path}.")
+
+        out_path = f"{all_file_name}.txt"
         with open(out_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
+            for member_line in member_lines:
+                f.write("\n".join(member_line))
         print(f"Member expense report saved to {out_path}.")
 
 
@@ -370,11 +379,11 @@ if __name__ == "__main__":
     data = api.fetch_tricount_data(tricount_key)
 
     # save data to local file
-    with open('response_data.json', 'w') as f:
-        json.dump(data, f, indent=2)
+    with open('response_data.json', 'w', encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
     # load data from local file
-    #with open('response_data.json', 'r') as f:
+    #with open('response_data.json', 'r', encoding="utf-8") as f:
     #    data = json.load(f)
 
     handler = TricountHandler()
@@ -387,4 +396,8 @@ if __name__ == "__main__":
     #handler.write_to_excel(transactions, file_name=f"Transactions {tricount_title}")
     #handler.write_to_sesterce_csv(memberships, transactions, f"Transaction {tricount_title} (Sesterce)")
     #handler.download_attachments(transactions, download_folder=f"Attachments {tricount_title}")
-    handler.write_expenses_text_report(memberships, transactions, file_name=f"Expenses {tricount_title}")
+    handler.write_expenses_text_report(
+            memberships,
+            transactions,
+            all_file_name=f"All expenses {tricount_title}",
+            user_file_name=f"Expenses")
