@@ -416,8 +416,16 @@ class TricountHandler:
 
     @staticmethod
     def write_expenses_text_report(
-        memberships, transactions, all_file_name="expenses", user_file_name="user"
+        memberships,
+        transactions,
+        all_file_name="expenses",
+        user_file_name="user",
+        text_dir="expense_reports_text",
+        images_dir="expense_reports_images",
     ):
+        os.makedirs(text_dir, exist_ok=True)
+        os.makedirs(images_dir, exist_ok=True)
+
         members = sorted(m["Name"] for m in memberships)
         lines = []
         member_lines = []
@@ -474,8 +482,8 @@ class TricountHandler:
                     transfer += user_other_amt
                     is_income = user_me_amt > 0.0
                     lines_transfer.append(
-                        f"  {(-1 if is_income else 1) * amt:9.2f}"
-                        f"{ccy} [{d}] — {desc} — {'мне <-' if is_income else 'я ->'} {user_other_name}"
+                        f"  {(-1 if is_income else 1) * amt:9.2f} {ccy} [{d}] — {desc} — "
+                        f"{'мне <-' if is_income else 'я ->'} {user_other_name}"
                     )
                 if is_payer and not is_transfer:
                     paid += amt
@@ -511,15 +519,15 @@ class TricountHandler:
             lines.append("")
 
             member_lines.append(lines)
-            txt_path = f"{user_file_name} {name}.txt"
+            txt_path = os.path.join(text_dir, f"{user_file_name} {name}.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
             print(f"  {name} expense report saved to {txt_path}.")
-            png_path = f"{user_file_name} {name}.png"
+            png_path = os.path.join(images_dir, f"{user_file_name} {name}.png")
             TricountHandler._write_lines_as_image(lines, png_path)
             print(f"  {name} expense report image saved to {png_path}.")
 
-        txt_path = f"{all_file_name}.txt"
+        txt_path = os.path.join(text_dir, f"{all_file_name}.txt")
         with open(txt_path, "w", encoding="utf-8") as f:
             for member_line in member_lines:
                 f.write("\n".join(member_line))
@@ -528,7 +536,7 @@ class TricountHandler:
         all_lines = []
         for member_line in member_lines:
             all_lines.extend(member_line)
-        png_path = f"{all_file_name}.png"
+        png_path = os.path.join(images_dir, f"{all_file_name}.png")
         TricountHandler._write_lines_as_image(all_lines, png_path)
         print(f"Member expense report image saved to {png_path}.")
 
