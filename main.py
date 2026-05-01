@@ -1,8 +1,12 @@
-import requests
+import argparse
+import calendar
 import json
-import uuid
 import os
-from datetime import datetime
+import uuid
+from datetime import date, datetime
+from typing import Optional
+
+import requests
 
 from PIL import Image, ImageDraw, ImageFont
 import rsa
@@ -456,7 +460,6 @@ class TricountHandler:
             ccy = transactions[0]["Currency"] if transactions else ""
 
             sorted_tx = sorted(transactions, key=lambda t: t["When"], reverse=True)
-            any_row = False
             for t in sorted_tx:
                 is_transfer = t["Type"] == "BALANCE"
                 is_payer = t["Who Paid"] == name
@@ -464,7 +467,6 @@ class TricountHandler:
                 has_share = share > 0
                 if not is_payer and not has_share:
                     continue
-                any_row = True
                 ccy = t["Currency"]
                 d = tx_date(t["When"])
                 kind = tx_type_ru(t["Type"])
@@ -497,17 +499,16 @@ class TricountHandler:
                         f"  {share:9.2f} {ccy} из {amt:9.2f} [{d} {kind}] от {payer_label} — {desc}"
                     )
 
+            empty_msg = "  (нет операций с вашим участием)"
+
             lines.append("Переводы:")
-            lines += lines_transfer
+            lines.extend(lines_transfer if lines_transfer else [empty_msg])
             lines.append("")
             lines.append("Оплаты и получения:")
-            lines += lines_payer
+            lines.extend(lines_payer if lines_payer else [empty_msg])
             lines.append("")
             lines.append("Участие в расходах:")
-            lines += lines_share
-
-            if not any_row:
-                lines.append("  (нет операций с вашим участием)")
+            lines.extend(lines_share if lines_share else [empty_msg])
 
             bal = transfer + paid - spent
             lines.append("")
@@ -541,7 +542,87 @@ class TricountHandler:
         print(f"Member expense report image saved to {png_path}.")
 
 
+def _parse_transaction_datetime(when: str) -> datetime:
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(when, fmt)
+        except ValueError:
+            continue
+    return datetime.strptime(when[:10], "%Y-%m-%d")
+
+
+def current_calendar_month_bounds(now: Optional[datetime] = None) -> tuple:
+    """First and last calendar day of the month containing `now` (local time)."""
+    now = now or datetime.now()
+    first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    _, last_day = calendar.monthrange(now.year, now.month)
+    last = first.replace(day=last_day)
+    return first, last
+
+
+def filter_transactions_current_calendar_month(transactions: list) -> tuple:
+    """
+    Keep transactions whose date falls in the current calendar month.
+    Returns (filtered_list, label) e.g. "2026-05".
+    """
+    start, end = current_calendar_month_bounds()
+    label = f"{start.year:04d}-{start.month:02d}"
+    start_d, end_d = start.date(), end.date()
+    out = []
+    for t in transactions:
+        d = _parse_transaction_datetime(t["When"]).date()
+        if start_d <= d <= end_d:
+            out.append(t)
+    return out, label
+
+
+def _parse_cli_date(s: str) -> date:
+    return datetime.strptime(s, "%Y-%m-%d").date()
+
+
+def filter_transactions_date_range(
+    transactions: list, start_d: date, end_d: date
+) -> tuple:
+    """
+    Keep transactions whose calendar date is within [start_d, end_d] inclusive.
+    Returns (filtered_list, label) e.g. "2026-01-10_2026-03-31".
+    """
+    out = []
+    for t in transactions:
+        d = _parse_transaction_datetime(t["When"]).date()
+        if start_d <= d <= end_d:
+            out.append(t)
+    label = f"{start_d.isoformat()}_{end_d.isoformat()}"
+    return out, label
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Tricount export / expense reports.")
+    parser.add_argument(
+        "--current-month",
+        action="store_true",
+        dest="current_month",
+        help="Only include transactions from the current calendar month (reports only).",
+    )
+    parser.add_argument(
+        "--from-date",
+        metavar="YYYY-MM-DD",
+        help="Start of date range (inclusive); use together with --to-date.",
+    )
+    parser.add_argument(
+        "--to-date",
+        metavar="YYYY-MM-DD",
+        help="End of date range (inclusive); use together with --from-date.",
+    )
+    args = parser.parse_args()
+
+    has_from = args.from_date is not None
+    has_to = args.to_date is not None
+    if has_from ^ has_to:
+        parser.error("Specify both --from-date and --to-date, or neither.")
+    if args.current_month and has_from:
+        parser.error("Do not combine --current-month with --from-date/--to-date.")
+
     # example key
     tricount_key = "tISWyMCgrIMgFuxudZ"
 
@@ -560,6 +641,29 @@ if __name__ == "__main__":
     handler = TricountHandler()
     tricount_title = handler.get_tricount_title(data)
     memberships, transactions = handler.parse_tricount_data(data)
+
+    month_suffix = ""
+    if args.current_month:
+        transactions, month_label = filter_transactions_current_calendar_month(
+            transactions
+        )
+        month_suffix = f" {month_label}"
+        print(
+            f"Current-month mode: {len(transactions)} transaction(s) for calendar month {month_label}."
+        )
+    elif has_from:
+        start_d = _parse_cli_date(args.from_date)
+        end_d = _parse_cli_date(args.to_date)
+        if start_d > end_d:
+            parser.error("--from-date must not be after --to-date.")
+        transactions, range_label = filter_transactions_date_range(
+            transactions, start_d, end_d
+        )
+        month_suffix = f" {range_label}"
+        print(
+            f"Date range mode: {len(transactions)} transaction(s) from {start_d} to {end_d}."
+        )
+
     # handler.write_to_csv(transactions, file_name=f"Transactions {tricount_title}")
     # handler.write_to_excel(transactions, file_name=f"Transactions {tricount_title}")
     # handler.write_to_sesterce_csv(memberships, transactions, f"Transaction {tricount_title} (Sesterce)")
@@ -567,6 +671,6 @@ if __name__ == "__main__":
     handler.write_expenses_text_report(
         memberships,
         transactions,
-        all_file_name=f"All expenses {tricount_title}",
-        user_file_name=f"Expenses",
+        all_file_name=f"All expenses {tricount_title}{month_suffix}",
+        user_file_name=f"Expenses{month_suffix.replace(' ', '_')}",
     )
